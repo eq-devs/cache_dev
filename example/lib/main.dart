@@ -3,8 +3,10 @@ import 'dart:math';
 
 import 'package:cache_dev/cache_dev.dart';
 import 'package:flutter/material.dart';
-import 'package:hive/hive.dart';
+import 'package:hive_ce/hive.dart';
 import 'package:path_provider/path_provider.dart';
+
+import 'sample_payload.dart';
 
 void main() {
   runApp(const CacheDevExampleApp());
@@ -53,6 +55,7 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
     'product_page_1',
     'order_page_1',
     'price_tracking',
+    'orders_api',
   ];
 
   @override
@@ -65,7 +68,7 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
     final docs = await getApplicationDocumentsDirectory();
     final directory = Directory('${docs.path}/cache_dev_example');
     Hive.init('${docs.path}/cache_dev_example_hive');
-    final hiveBox = await Hive.openBox<Object?>('json_payloads');
+    final hiveBox = await Hive.openBox<Object?>('payloads');
     final cache = CacheDevStore(
       options: CacheOptions(
         directory: directory,
@@ -78,7 +81,7 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
     );
 
     await cache.warmUp(_previewKeys);
-    final files = await _countJsonFiles(directory);
+    final files = await _countCacheFiles(directory);
 
     if (!mounted) {
       return;
@@ -90,7 +93,7 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
       _diskFiles = files;
       _hiveEntries = hiveBox.length;
       _busy = false;
-      _status = 'Ready for cache_dev JSON files and Hive comparison.';
+      _status = 'Ready for cache_dev MessagePack files and Hive comparison.';
     });
   }
 
@@ -104,14 +107,14 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
     setState(() {
       _busy = true;
       _status =
-          'Writing homepage, profile, product pages, orders, and prices...';
+          'Writing homepage, profile, product pages, orders, prices, and API...';
     });
 
     final snapshot = ExamplePayloadFactory.createSnapshot();
     final watch = Stopwatch()..start();
     await _writeSnapshot(cache, snapshot);
     watch.stop();
-    final files = await _countJsonFiles(directory);
+    final files = await _countCacheFiles(directory);
 
     if (!mounted) {
       return;
@@ -121,7 +124,7 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
       _diskFiles = files;
       _busy = false;
       _status =
-          'Wrote ${snapshot.cacheKeys.length} JSON files in '
+          'Wrote ${snapshot.cacheKeys.length} MessagePack files in '
           '${watch.elapsedMilliseconds} ms.';
     });
   }
@@ -134,7 +137,7 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
 
     setState(() {
       _busy = true;
-      _status = 'Reading all cached JSON payloads...';
+      _status = 'Reading all cached payloads...';
     });
 
     final watch = Stopwatch()..start();
@@ -149,7 +152,7 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
       _busy = false;
       _status = snapshot == null
           ? 'Cache miss. Write sample data first.'
-          : 'Read ${snapshot.cacheKeys.length} JSON files in '
+          : 'Read ${snapshot.cacheKeys.length} MessagePack files in '
                 '${watch.elapsedMilliseconds} ms.';
     });
   }
@@ -189,11 +192,11 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
 
     setState(() {
       _busy = true;
-      _status = 'Running write/read benchmark with large JSON payloads...';
+      _status = 'Running write/read benchmark with large payloads...';
     });
 
     final result = await ExampleBenchmark(cache: cache).run();
-    final files = await _countJsonFiles(directory);
+    final files = await _countCacheFiles(directory);
 
     if (!mounted) {
       return;
@@ -218,7 +221,8 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
 
     setState(() {
       _busy = true;
-      _status = 'Comparing cache_dev JSON files with Hive box writes/reads...';
+      _status =
+          'Comparing cache_dev MessagePack files with Hive on the real payload...';
     });
 
     final result = await HiveComparisonBenchmark(
@@ -226,7 +230,7 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
       directory: directory,
       hiveBox: hiveBox,
     ).run();
-    final files = await _countJsonFiles(directory);
+    final files = await _countCacheFiles(directory);
 
     if (!mounted) {
       return;
@@ -238,7 +242,7 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
       _busy = false;
       _status =
           'Comparison completed with ${result.payloads} payloads. '
-          'Lower milliseconds is better.';
+          'Lower milliseconds and bytes are better.';
     });
   }
 
@@ -256,7 +260,7 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
 
     await cache.clear();
     await _hiveBox?.clear();
-    final files = await _countJsonFiles(directory);
+    final files = await _countCacheFiles(directory);
 
     if (!mounted) {
       return;
@@ -318,6 +322,14 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
       ttl: const Duration(minutes: 2),
       version: 1,
     );
+
+    // The real Jana Post orders API response, cached as a single rich entry.
+    await cache.setJson(
+      'orders_api',
+      snapshot.apiResponse,
+      ttl: const Duration(minutes: 30),
+      version: 4,
+    );
   }
 
   Future<ExampleSnapshot?> _readSnapshot(CacheDevStore cache) async {
@@ -366,12 +378,21 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
       return null;
     }
 
+    final apiResponse = await cache.get<Map<String, Object?>>(
+      'orders_api',
+      decoder: (json) => Map<String, Object?>.from(json! as Map),
+    );
+    if (apiResponse == null) {
+      return null;
+    }
+
     return ExampleSnapshot(
       home: home,
       profile: profile,
       productPages: productPages,
       orderPages: orderPages,
       priceTracking: priceTracking,
+      apiResponse: apiResponse,
     );
   }
 
@@ -381,14 +402,14 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
         .toList();
   }
 
-  Future<int> _countJsonFiles(Directory directory) async {
+  Future<int> _countCacheFiles(Directory directory) async {
     try {
       if (!await directory.exists()) {
         return 0;
       }
       var count = 0;
       await for (final entity in directory.list(recursive: true)) {
-        if (entity is File && entity.path.endsWith('.json')) {
+        if (entity is File && entity.path.endsWith('.msgpack')) {
           count++;
         }
       }
@@ -461,6 +482,11 @@ class _CacheExamplePageState extends State<CacheExamplePage> {
                   icon: Icon(Icons.price_change_outlined),
                   label: Text('Prices'),
                 ),
+                ButtonSegment<int>(
+                  value: 4,
+                  icon: Icon(Icons.cloud_outlined),
+                  label: Text('API'),
+                ),
               ],
               selected: <int>{_selectedPreview},
               onSelectionChanged: _busy
@@ -520,7 +546,7 @@ class _HeaderPanel extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Split JSON file cache',
+                  'Split MessagePack file cache',
                   style: theme.textTheme.titleLarge?.copyWith(
                     color: colorScheme.onPrimaryContainer,
                   ),
@@ -587,12 +613,12 @@ class _ActionBar extends StatelessWidget {
         FilledButton.icon(
           onPressed: busy ? null : onWriteAll,
           icon: const Icon(Icons.save_alt),
-          label: const Text('Write JSON'),
+          label: const Text('Write'),
         ),
         FilledButton.tonalIcon(
           onPressed: busy ? null : onReadAll,
           icon: const Icon(Icons.cached),
-          label: const Text('Read JSON'),
+          label: const Text('Read'),
         ),
         OutlinedButton.icon(
           onPressed: busy ? null : onWarm,
@@ -639,7 +665,11 @@ class _MetricGrid extends StatelessWidget {
     final result = benchmark;
     final compare = comparison;
     final entries = <_Metric>[
-      _Metric('JSON files', diskFiles.toString(), Icons.folder_copy_outlined),
+      _Metric(
+        'Cache files',
+        diskFiles.toString(),
+        Icons.folder_copy_outlined,
+      ),
       _Metric(
         'Hive entries',
         hiveEntries.toString(),
@@ -671,8 +701,13 @@ class _MetricGrid extends StatelessWidget {
         Icons.read_more_outlined,
       ),
       _Metric(
-        'Hive read',
-        compare == null ? '-' : '${compare.hiveRawReadMs} ms',
+        'cache_dev size',
+        compare == null ? '-' : _kb(compare.cacheDevDiskBytes),
+        Icons.sd_storage_outlined,
+      ),
+      _Metric(
+        'Hive size',
+        compare == null ? '-' : _kb(compare.hiveDiskBytes),
         Icons.compare_arrows_outlined,
       ),
     ];
@@ -805,7 +840,7 @@ class _PreviewList extends StatelessWidget {
               ),
             )
             .toList(),
-      _ =>
+      3 =>
         data.priceTracking
             .take(10)
             .map(
@@ -817,6 +852,19 @@ class _PreviewList extends StatelessWidget {
               ),
             )
             .toList(),
+      _ => data.apiOrders
+          .take(10)
+          .map(
+            (order) => _PreviewItem(
+              leading: '#',
+              title: order['order_no']?.toString() ?? '-',
+              subtitle:
+                  '${(order['marketplace'] as Map?)?['name'] ?? '-'} - '
+                  '${(order['status_text'] as Map?)?['en'] ?? order['status']}',
+              trailing: order['status']?.toString() ?? '',
+            ),
+          )
+          .toList(),
     };
   }
 }
@@ -834,7 +882,7 @@ class _EmptyPreview extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        'No cached preview yet. Tap Write JSON, then Read JSON or Benchmark.',
+        'No cached preview yet. Tap Write, then Read or Benchmark.',
         style: theme.textTheme.bodyMedium,
       ),
     );
@@ -911,11 +959,6 @@ class _HiveComparisonPanel extends StatelessWidget {
             _row('', 'cache_dev', 'Hive'),
             _row('Payloads', '${result.payloads}', '${result.payloads}'),
             _row(
-              'Rows each',
-              '${result.itemsPerPayload}',
-              '${result.itemsPerPayload}',
-            ),
-            _row(
               'Write',
               '${result.cacheDevWriteMs} ms',
               '${result.hiveWriteMs} ms',
@@ -930,12 +973,17 @@ class _HiveComparisonPanel extends StatelessWidget {
               '${result.cacheDevDecodeReadMs} ms',
               '${result.hiveDecodeReadMs} ms',
             ),
+            _row(
+              'Disk size',
+              _kb(result.cacheDevDiskBytes),
+              _kb(result.hiveDiskBytes),
+            ),
           ],
         ),
         const SizedBox(height: 8),
         Text(
-          'Hive is included only in the example for comparison. '
-          'The package implementation remains a lightweight split JSON file cache.',
+          'Hive is included only in the example for comparison. The package '
+          'implementation stores each entry as a lightweight MessagePack file.',
           style: theme.textTheme.bodySmall,
         ),
       ],
@@ -962,6 +1010,13 @@ class _HiveComparisonPanel extends StatelessWidget {
   }
 }
 
+String _kb(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+  return '${(kb / 1024).toStringAsFixed(2)} MB';
+}
+
 class ExamplePayloadFactory {
   const ExamplePayloadFactory._();
 
@@ -984,6 +1039,7 @@ class ExamplePayloadFactory {
           page: createOrderPage(page, orderItemsPerPage),
       },
       priceTracking: createPriceTracking(priceTrackingItems),
+      apiResponse: kSampleApiResponse,
     );
   }
 
@@ -1157,31 +1213,29 @@ class HiveComparisonBenchmark {
   final Directory directory;
   final Box<Object?> hiveBox;
 
-  Future<HiveComparisonResult> run() async {
-    const payloads = 40;
-    const itemsPerPayload = 120;
+  /// Copies of the real API response to cache. Each copy is stored under its
+  /// own key, the way an app caches one response per page / per user.
+  static const payloads = 60;
 
-    final values = List<List<Map<String, Object?>>>.generate(
-      payloads,
-      (index) =>
-          ExamplePayloadFactory.createProductPage(index + 1, itemsPerPayload),
-    );
+  Future<HiveComparisonResult> run() async {
+    final payload = kSampleApiResponse;
 
     final cacheDevWriteWatch = Stopwatch()..start();
     await cache.setJsonAll(
       <String, Object?>{
-        for (var i = 0; i < payloads; i++)
-          'compare_cache_dev_payload_$i': values[i],
+        for (var i = 0; i < payloads; i++) 'compare_cache_dev_payload_$i': payload,
       },
       ttl: const Duration(minutes: 20),
       concurrency: 6,
     );
     cacheDevWriteWatch.stop();
 
+    final cacheDevDiskBytes = await _dirBytes(directory, suffix: '.msgpack');
+
     final coldCache = CacheDevStore(
       options: CacheOptions(
         directory: directory,
-        memoryMaxEntries: 32,
+        memoryMaxEntries: 8,
         isolateThresholdBytes: 12 * 1024,
         defaultTtl: const Duration(minutes: 10),
         flushWrites: false,
@@ -1189,36 +1243,38 @@ class HiveComparisonBenchmark {
       ),
     );
 
-    final cacheDevRawReadWatch = Stopwatch()..start();
-    await coldCache.getJsonAll(
-      List<String>.generate(
-        payloads,
-        (index) => 'compare_cache_dev_payload_$index',
-      ),
-      concurrency: 6,
+    final cacheDevKeys = List<String>.generate(
+      payloads,
+      (index) => 'compare_cache_dev_payload_$index',
     );
+
+    final cacheDevRawReadWatch = Stopwatch()..start();
+    await coldCache.getJsonAll(cacheDevKeys, concurrency: 6);
     cacheDevRawReadWatch.stop();
 
     final cacheDevDecodeReadWatch = Stopwatch()..start();
-    for (var i = 0; i < payloads; i++) {
-      await coldCache.get<List<Map<String, Object?>>>(
-        'compare_cache_dev_payload_$i',
-        decoder: _decodeMapList,
+    for (final key in cacheDevKeys) {
+      await coldCache.get<Map<String, Object?>>(
+        key,
+        decoder: (json) => Map<String, Object?>.from(json! as Map),
       );
     }
     cacheDevDecodeReadWatch.stop();
 
     final hiveWriteWatch = Stopwatch()..start();
     for (var i = 0; i < payloads; i++) {
-      await hiveBox.put('compare_hive_payload_$i', values[i]);
+      await hiveBox.put('compare_hive_payload_$i', payload);
     }
     await hiveBox.flush();
     hiveWriteWatch.stop();
 
+    final hiveDiskBytes = await _dirBytes(
+      Directory('${directory.path}/../cache_dev_example_hive'),
+    );
+
     final hiveRawReadWatch = Stopwatch()..start();
     for (var i = 0; i < payloads; i++) {
-      final value = hiveBox.get('compare_hive_payload_$i') as List<dynamic>?;
-      if (value == null) {
+      if (hiveBox.get('compare_hive_payload_$i') == null) {
         throw StateError('Missing Hive benchmark payload $i');
       }
     }
@@ -1226,30 +1282,38 @@ class HiveComparisonBenchmark {
 
     final hiveDecodeReadWatch = Stopwatch()..start();
     for (var i = 0; i < payloads; i++) {
-      final value = hiveBox.get('compare_hive_payload_$i') as List<dynamic>?;
+      final value = hiveBox.get('compare_hive_payload_$i') as Map?;
       if (value == null) {
         throw StateError('Missing Hive benchmark payload $i');
       }
-      _decodeMapList(value);
+      Map<String, Object?>.from(value);
     }
     hiveDecodeReadWatch.stop();
 
     return HiveComparisonResult(
       payloads: payloads,
-      itemsPerPayload: itemsPerPayload,
       cacheDevWriteMs: cacheDevWriteWatch.elapsedMilliseconds,
       cacheDevRawReadMs: cacheDevRawReadWatch.elapsedMilliseconds,
       cacheDevDecodeReadMs: cacheDevDecodeReadWatch.elapsedMilliseconds,
+      cacheDevDiskBytes: cacheDevDiskBytes,
       hiveWriteMs: hiveWriteWatch.elapsedMilliseconds,
       hiveRawReadMs: hiveRawReadWatch.elapsedMilliseconds,
       hiveDecodeReadMs: hiveDecodeReadWatch.elapsedMilliseconds,
+      hiveDiskBytes: hiveDiskBytes,
     );
   }
 
-  static List<Map<String, Object?>> _decodeMapList(Object? json) {
-    return (json as List<dynamic>)
-        .map((item) => Map<String, Object?>.from(item as Map))
-        .toList();
+  Future<int> _dirBytes(Directory dir, {String? suffix}) async {
+    if (!await dir.exists()) {
+      return 0;
+    }
+    var total = 0;
+    await for (final entity in dir.list(recursive: true)) {
+      if (entity is File && (suffix == null || entity.path.endsWith(suffix))) {
+        total += await entity.length();
+      }
+    }
+    return total;
   }
 }
 
@@ -1260,6 +1324,7 @@ class ExampleSnapshot {
     required this.productPages,
     required this.orderPages,
     required this.priceTracking,
+    required this.apiResponse,
   });
 
   final Map<String, Object?> home;
@@ -1267,6 +1332,7 @@ class ExampleSnapshot {
   final Map<int, List<Map<String, Object?>>> productPages;
   final Map<int, List<Map<String, Object?>>> orderPages;
   final List<Map<String, Object?>> priceTracking;
+  final Map<String, Object?> apiResponse;
 
   List<String> get cacheKeys {
     return <String>[
@@ -1275,7 +1341,24 @@ class ExampleSnapshot {
       for (final page in productPages.keys) 'product_page_$page',
       for (final page in orderPages.keys) 'order_page_$page',
       'price_tracking',
+      'orders_api',
     ];
+  }
+
+  /// Orders list pulled out of the real API response for the preview tab.
+  List<Map<String, Object?>> get apiOrders {
+    final data = apiResponse['data'];
+    if (data is! Map) {
+      return const <Map<String, Object?>>[];
+    }
+    final orders = data['orders'];
+    if (orders is! List) {
+      return const <Map<String, Object?>>[];
+    }
+    return orders
+        .whereType<Map>()
+        .map((order) => Map<String, Object?>.from(order))
+        .toList();
   }
 
   int get productCount {
@@ -1310,23 +1393,25 @@ class BenchmarkResult {
 class HiveComparisonResult {
   const HiveComparisonResult({
     required this.payloads,
-    required this.itemsPerPayload,
     required this.cacheDevWriteMs,
     required this.cacheDevRawReadMs,
     required this.cacheDevDecodeReadMs,
+    required this.cacheDevDiskBytes,
     required this.hiveWriteMs,
     required this.hiveRawReadMs,
     required this.hiveDecodeReadMs,
+    required this.hiveDiskBytes,
   });
 
   final int payloads;
-  final int itemsPerPayload;
   final int cacheDevWriteMs;
   final int cacheDevRawReadMs;
   final int cacheDevDecodeReadMs;
+  final int cacheDevDiskBytes;
   final int hiveWriteMs;
   final int hiveRawReadMs;
   final int hiveDecodeReadMs;
+  final int hiveDiskBytes;
 }
 
 class Product {

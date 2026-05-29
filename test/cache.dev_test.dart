@@ -1,8 +1,8 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:cache_dev/cache_dev.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:msgpack_dart/msgpack_dart.dart' as msgpack;
 
 void main() {
   late Directory directory;
@@ -68,7 +68,7 @@ void main() {
       encoder: (value) => value,
       ttl: const Duration(milliseconds: 1),
     );
-    final file = DiskJsonCache(
+    final file = DiskMsgpackCache(
       options: CacheOptions(directory: directory),
     ).fileForKey('expired');
     await Future<void>.delayed(const Duration(milliseconds: 5));
@@ -105,11 +105,11 @@ void main() {
     );
   });
 
-  test('corrupted JSON returns null', () async {
-    final disk = DiskJsonCache(options: CacheOptions(directory: directory));
+  test('corrupted file returns null', () async {
+    final disk = DiskMsgpackCache(options: CacheOptions(directory: directory));
     final file = disk.fileForKey('bad');
     await file.parent.create(recursive: true);
-    await file.writeAsString('{bad json');
+    await file.writeAsBytes(<int>[0xc1, 0xff, 0x00, 0x99]);
 
     final value = await cache.get<String>(
       'bad',
@@ -128,7 +128,7 @@ void main() {
       version: 7,
     );
 
-    final entry = await DiskJsonCache(
+    final entry = await DiskMsgpackCache(
       options: CacheOptions(directory: directory),
     ).read('versioned');
 
@@ -162,16 +162,13 @@ void main() {
 
     await Future.wait(writes);
 
-    final file = DiskJsonCache(
+    final file = DiskMsgpackCache(
       options: CacheOptions(directory: directory),
     ).fileForKey('same');
-    final decoded = jsonDecode(await file.readAsString());
+    final decoded = msgpack.deserialize(await file.readAsBytes());
 
-    expect(decoded, isA<Map<String, Object?>>());
-    expect(
-      (decoded as Map<String, Object?>)['data'],
-      isA<Map<String, Object?>>(),
-    );
+    expect(decoded, isA<Map>());
+    expect((decoded as Map)['data'], isA<Map>());
   });
 
   test('setJsonAll and getJsonAll handle bulk raw JSON values', () async {
@@ -211,7 +208,7 @@ void main() {
     const hasher = KeyHasher();
     final path = hasher.fileNameForKey('product_123');
 
-    expect(path, endsWith('.json'));
+    expect(path, endsWith('.msgpack'));
     expect(path.contains(Platform.pathSeparator), isTrue);
     expect(path.split(Platform.pathSeparator).first.length, 2);
   });

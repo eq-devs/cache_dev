@@ -11,9 +11,9 @@ class KeyHasher {
   String fileNameForKey(String key) {
     final hash = sha1.convert(utf8.encode(key)).toString();
     if (!enableSharding) {
-      return '$hash.json';
+      return '$hash.msgpack';
     }
     return '${hash.substring(0, 2)}${Platform.pathSeparator}'
-        '${hash.substring(2)}.json';
+        '${hash.substring(2)}.msgpack';
   }
 }

@@ -32,8 +32,10 @@ dependencies:
     path: ..
   flutter:
     sdk: flutter
-  hive: ^2.2.3
-  hive_flutter: ^1.1.0
+  # Maintained Dart 3 fork of Hive (classic `hive` caps at Dart <3.0).
+  # Used only by the example's benchmark screen to compare against cache_dev.
+  hive_ce: ^2.19.3
+  hive_ce_flutter: ^2.3.4
   path_provider: ^2.1.5
 
 dev_dependencies:

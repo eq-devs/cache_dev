@@ -1,28 +1,29 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'cache.entry.dart';
 import 'cache.exception.dart';
 import 'cache.options.dart';
-import 'json.codec.worker.dart';
 import 'key.hasher.dart';
+import 'msgpack.codec.worker.dart';
 
-class DiskJsonCache {
-  DiskJsonCache({
+class DiskMsgpackCache {
+  DiskMsgpackCache({
     required CacheOptions options,
-    JsonCodecWorker? codec,
+    MsgpackCodecWorker? codec,
     KeyHasher? keyHasher,
   }) : _options = options,
        _codec =
            codec ??
-           JsonCodecWorker(
+           MsgpackCodecWorker(
              isolateThresholdBytes: options.isolateThresholdBytes,
            ),
        _keyHasher =
            keyHasher ?? KeyHasher(enableSharding: options.enableSharding);
 
   final CacheOptions _options;
-  final JsonCodecWorker _codec;
+  final MsgpackCodecWorker _codec;
   final KeyHasher _keyHasher;
 
   File fileForKey(String key) {
@@ -36,7 +37,7 @@ class DiskJsonCache {
         return null;
       }
 
-      final source = await file.readAsString();
+      final source = await file.readAsBytes();
       final decoded = await _codec.decode(source);
       if (decoded is! Map) {
         throw const FormatException('Cache file root must be an object.');
@@ -65,20 +66,20 @@ class DiskJsonCache {
     final parent = file.parent;
     final tempFile = File('${file.path}.tmp');
 
-    final String source;
+    final Uint8List source;
     try {
       source = await _codec.encode(entry.toJson());
     } on Object catch (error) {
       throw CacheDevException(
         'Failed to encode cache entry for key "$key". '
-        'Cached values must be JSON-compatible.',
+        'Cached values must be MessagePack-compatible.',
         error,
       );
     }
 
     try {
       await parent.create(recursive: true);
-      await tempFile.writeAsString(source, flush: _options.flushWrites);
+      await tempFile.writeAsBytes(source, flush: _options.flushWrites);
       await _atomicRename(tempFile, file);
     } on FileSystemException {
       await _deleteFileIfExists(tempFile);
@@ -101,8 +102,9 @@ class DiskJsonCache {
   }
 
   Future<void> remove(String key) async {
-    await _deleteFileIfExists(fileForKey(key));
-    await _deleteFileIfExists(File('${fileForKey(key).path}.tmp'));
+    final file = fileForKey(key);
+    await _deleteFileIfExists(file);
+    await _deleteFileIfExists(File('${file.path}.tmp'));
   }
 
   Future<void> clear() async {
@@ -130,7 +132,7 @@ class DiskJsonCache {
           await _deleteFileIfExists(entity);
           continue;
         }
-        if (!entity.path.endsWith('.json')) {
+        if (!entity.path.endsWith('.msgpack')) {
           continue;
         }
         await _removeIfExpiredOrCorrupt(entity);
@@ -142,7 +144,7 @@ class DiskJsonCache {
 
   Future<void> _removeIfExpiredOrCorrupt(File file) async {
     try {
-      final source = await file.readAsString();
+      final source = await file.readAsBytes();
       final decoded = await _codec.decode(source);
       if (decoded is! Map) {
         throw const FormatException('Cache file root must be an object.');

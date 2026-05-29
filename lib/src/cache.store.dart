@@ -1,20 +1,20 @@
 import 'cache.base.dart';
 import 'cache.entry.dart';
 import 'cache.options.dart';
-import 'disk.json.cache.dart';
+import 'disk.msgpack.cache.dart';
 import 'memory_lru_cache.dart';
 
 class CacheDevStore implements CacheDev {
-  CacheDevStore({required CacheOptions options, DiskJsonCache? diskCache})
+  CacheDevStore({required CacheOptions options, DiskMsgpackCache? diskCache})
     : _options = options,
       _memory = MemoryLruCache<CacheEntry>(
         maxEntries: options.memoryMaxEntries,
       ),
-      _disk = diskCache ?? DiskJsonCache(options: options);
+      _disk = diskCache ?? DiskMsgpackCache(options: options);
 
   final CacheOptions _options;
   final MemoryLruCache<CacheEntry> _memory;
-  final DiskJsonCache _disk;
+  final DiskMsgpackCache _disk;
   final Map<String, Future<void>> _writeQueues = <String, Future<void>>{};
 
   @override

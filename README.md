@@ -1,23 +1,23 @@
 # cache_dev
 
-`cache_dev` is a lightweight, mobile-first JSON file cache for Flutter apps.
+`cache_dev` is a lightweight, mobile-first MessagePack binary file cache for Flutter apps.
 
 It is designed for API response caching, offline-first screen restore, product and order lists, homepage data, price snapshots, and WebView-heavy hybrid apps that need fast exact-key cache access without adding a full database.
 
 ## Features
 
 - Memory LRU cache for hot entries
-- One cache key per JSON file
+- One cache key per MessagePack file
 - Async file IO
 - Safe writes through temp file + rename
 - TTL expiration
 - Version field for future migrations
-- Background JSON encode/decode with `Isolate.run` for large payloads
-- Direct JSON encode/decode for small payloads to avoid isolate overhead
+- Background MessagePack encode/decode with `Isolate.run` for large payloads
+- Direct MessagePack encode/decode for small payloads to avoid isolate overhead
 - Hashed file names
 - Optional sharded folders for large cache directories
 - Per-key write serialization
-- Corrupted JSON handling
+- Corrupted file handling
 - Warm startup support
 - Android and iOS support
 - No Hive, Isar, Drift, SQLite, or sqflite
@@ -29,23 +29,23 @@ UI
 ↓
 Memory LRU Cache
 ↓
-Split JSON File Cache
+Split MessagePack File Cache
 ↓
 Remote API
 ```
 
-Each key is stored as a separate file. The package never writes all cached data into one large `cache.json`.
+Each key is stored as a separate file. The package never writes all cached data into one large file.
 
 Conceptually:
 
 ```text
 cache/
-├─ home.json
-├─ profile.json
-├─ order_page_1.json
-├─ order_page_2.json
-├─ product_123.json
-└─ price_tracking.json
+├─ home.msgpack
+├─ profile.msgpack
+├─ order_page_1.msgpack
+├─ order_page_2.msgpack
+├─ product_123.msgpack
+└─ price_tracking.msgpack
 ```
 
 In production, keys are hashed into safe filenames. With sharding enabled, files are split into folders:
@@ -53,29 +53,29 @@ In production, keys are hashed into safe filenames. With sharding enabled, files
 ```text
 cache/
 ├─ ab/
-│  └─ cdef123....json
+│  └─ cdef123....msgpack
 └─ 42/
-   └─ a9810b....json
+   └─ a9810b....msgpack
 ```
 
 ## Why not Hive or SQLite
 
 Hive, Isar, Drift, SQLite, and sqflite are good choices when your app needs indexes, queries, relations, transactions, local-first data models, or complex persistence.
 
-`cache_dev` is intentionally simpler. It is for JSON-compatible payloads that are read by exact key, where your remote API remains the source of truth. This keeps startup work low, memory usage predictable, and cache behavior easy to reason about.
+`cache_dev` is intentionally simpler. It is for plain-data payloads that are read by exact key, where your remote API remains the source of truth. This keeps startup work low, memory usage predictable, and cache behavior easy to reason about.
 
 ## Installation
 
 ```yaml
 dependencies:
-  cache_dev: ^0.0.1
+  cache_dev: ^0.1.0
 ```
 
 For mobile apps, use a directory from `path_provider`:
 
 ```yaml
 dependencies:
-  cache_dev: ^0.0.1
+  cache_dev: ^0.1.0
   path_provider: ^2.1.5
 ```
 
@@ -117,9 +117,9 @@ final home = await cache.get<HomeModel>(
 );
 ```
 
-The cache stores JSON-compatible data internally, not model instances. Your `encoder` converts a model into JSON-compatible data, and your `decoder` converts JSON-compatible data back into your model.
+The cache stores plain data internally, not model instances, serialized to MessagePack on disk. Your `encoder` converts a model into MessagePack-compatible data, and your `decoder` converts that data back into your model.
 
-Supported JSON-compatible values:
+Supported values:
 
 - `Map`
 - `List`
@@ -130,7 +130,7 @@ Supported JSON-compatible values:
 
 ## Cache file format
 
-Every file stores metadata and payload:
+Every file stores metadata and payload. On disk this is encoded as MessagePack; shown here as JSON for readability:
 
 ```json
 {
@@ -146,7 +146,7 @@ Fields:
 - `version`: app-controlled cache schema version
 - `updatedAt`: write time in milliseconds since epoch
 - `ttl`: time to live in milliseconds
-- `data`: JSON-compatible payload
+- `data`: the cached payload
 
 `Duration.zero` means the entry does not expire automatically.
 
@@ -327,7 +327,7 @@ cd example
 flutter run
 ```
 
-The example uses `path_provider` and works as a mobile cache console. It writes and reads multiple JSON payloads:
+The example uses `path_provider` and works as a mobile cache console. It writes and reads multiple payloads:
 
 - homepage cache
 - profile cache
@@ -340,7 +340,7 @@ It also includes UI actions for warm-up, clear, benchmark runs, and a side-by-si
 
 Hive is intentionally used only by the example app. The `cache_dev` package itself does not depend on Hive.
 
-The comparison separates raw reads from read-plus-map-copy work. This matters because Hive can return binary-stored Dart values directly, while `cache_dev` reads portable JSON files and decodes JSON text.
+The comparison separates raw reads from read-plus-map-copy work. This matters because Hive can return binary-stored Dart values directly, while `cache_dev` reads MessagePack files and decodes the binary payload.
 
 Example dependencies:
 
@@ -427,7 +427,7 @@ Use a database for those cases.
 
 - Use one key per response or page.
 - Keep hot data in memory and cold data on disk.
-- Store only JSON-compatible payloads.
+- Store only MessagePack-compatible payloads.
 - Do not preload the whole cache directory.
 - Keep payloads reasonably scoped.
 - Use `setJsonAll` and `getJsonAll` for many keys.
